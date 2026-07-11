@@ -1,0 +1,11 @@
+{
+  "server-url": "https://dav.example.com/remote.php/dav/files/USERNAME/",
+  "path": "Books",
+  "username": "USERNAME",
+  "password": "PASSWORD",
+  "insecure-skip-verify": false,
+  "recursive": true,
+  "delete-removed": true,
+  "allowed-kinds": ["pdf", "djvu", "epub", "fb2", "txt", "xps", "oxps", "mobi", "cbz"],
+  "timeout-seconds": 60
+}
