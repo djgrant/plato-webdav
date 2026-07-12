@@ -202,6 +202,48 @@ func TestSyncSkipsUnavailableFiles(t *testing.T) {
 	}
 }
 
+func TestSyncConvertsMarkdownToHTML(t *testing.T) {
+	dav := &fakeDAV{files: map[string][]byte{
+		"Review Me.md": []byte("# Title\n\nSome *notes* here.\n\n- one\n- two\n"),
+		"plain.html":   []byte("<html><body>as-is</body></html>"),
+	}}
+	s, out := newTestSyncer(t, dav)
+	s.cfg.AllowedKinds = []string{"md", "html"}
+	if err := s.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(s.saveDir, "Review Me.html"))
+	if err != nil {
+		t.Fatalf("converted file missing: %v", err)
+	}
+	for _, want := range []string{"<h1>Title</h1>", "<em>notes</em>", "<li>one</li>", "<title>Review Me</title>"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("converted HTML missing %q:\n%s", want, data)
+		}
+	}
+	if !strings.Contains(out.String(), `"path":"WebDAV/Review Me.html","kind":"html"`) {
+		t.Errorf("addDocument should reference the converted .html file:\n%s", out.String())
+	}
+	if plain, _ := os.ReadFile(filepath.Join(s.saveDir, "plain.html")); string(plain) != "<html><body>as-is</body></html>" {
+		t.Errorf("plain html should pass through untouched, got %q", plain)
+	}
+
+	// Removal on the server must remove the converted local file.
+	delete(dav.files, "Review Me.md")
+	out.Reset()
+	s.state = loadState(s.saveDir)
+	if err := s.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(s.saveDir, "Review Me.html")); err == nil {
+		t.Error("converted file should be removed when the .md disappears")
+	}
+	if !strings.Contains(out.String(), `"type":"removeDocument","path":"WebDAV/Review Me.html"`) {
+		t.Errorf("missing removeDocument for converted file:\n%s", out.String())
+	}
+}
+
 func TestSanitizeSegment(t *testing.T) {
 	cases := map[string]string{
 		`a:b*c?.epub`:  "a_b_c_.epub",

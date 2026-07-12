@@ -50,6 +50,11 @@ func loadConfig(path string) (*Config, error) {
 	for i, k := range cfg.AllowedKinds {
 		cfg.AllowedKinds[i] = strings.ToLower(strings.TrimPrefix(k, "."))
 	}
+	// Markdown is stored locally as converted HTML, so the local scan must
+	// recognize html whenever md is synced.
+	if cfg.kindAllowed("md") && !cfg.kindAllowed("html") {
+		cfg.AllowedKinds = append(cfg.AllowedKinds, "html")
+	}
 	if cfg.TimeoutSeconds <= 0 {
 		cfg.TimeoutSeconds = 60
 	}

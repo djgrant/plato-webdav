@@ -72,6 +72,11 @@ func mapRemote(files []RemoteFile) map[string]RemoteFile {
 	seen := make(map[string]bool, len(files))
 	for _, f := range files {
 		rel := sanitizeRelPath(f.RelPath)
+		// Markdown is converted to HTML on download (Plato has no md
+		// engine), so the local name reflects that.
+		if kindOf(rel) == "md" {
+			rel = strings.TrimSuffix(rel, path.Ext(rel)) + ".html"
+		}
 		folded := strings.ToLower(rel)
 		if seen[folded] {
 			sum := sha1.Sum([]byte(f.RelPath))
@@ -279,12 +284,27 @@ func (s *Syncer) download(ctx context.Context, rel string, rf RemoteFile) error 
 	if err != nil {
 		return err
 	}
-	n, err := io.Copy(f, body)
+	var n int64
+	if kindOf(rf.RelPath) == "md" {
+		var md []byte
+		md, err = io.ReadAll(body)
+		if err == nil && length > 0 && int64(len(md)) != length {
+			err = fmt.Errorf("short download: got %d of %d bytes", len(md), length)
+		}
+		if err == nil {
+			title := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+			var written int
+			written, err = f.WriteString(markdownToHTML(string(md), title))
+			n = int64(written)
+		}
+	} else {
+		n, err = io.Copy(f, body)
+		if err == nil && length > 0 && n != length {
+			err = fmt.Errorf("short download: got %d of %d bytes", n, length)
+		}
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
-	}
-	if err == nil && length > 0 && n != length {
-		err = fmt.Errorf("short download: got %d of %d bytes", n, length)
 	}
 	if err != nil {
 		os.Remove(tmp)

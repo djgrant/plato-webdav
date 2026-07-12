@@ -76,3 +76,18 @@ network events on stdin; Plato stops it with SIGTERM, which finishes the
 current download and exits cleanly.
 
 Basic auth only for now; Digest auth would be a straightforward follow-up.
+
+## Markdown
+
+If `md` is in `allowed-kinds`, markdown files are converted to HTML on
+download (Plato renders HTML but has no markdown engine): `Notes.md` on the
+server becomes `Notes.html` locally, and server-side deletion removes it.
+Plain `.html`/`.htm` files pass through untouched. Add `html` and `htm` to
+Plato's `[import] allowed-kinds` so its importer accepts them.
+
+## Multiple folders
+
+Run one hook instance per synced folder: give each its own directory
+(binary copy + `Settings.json`, since config is read from the binary's
+directory) and its own `[[libraries.hooks]]` entry — e.g. `Books` syncing
+the server root and `Reviewables` syncing a second WebDAV share.
