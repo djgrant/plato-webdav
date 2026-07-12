@@ -37,13 +37,16 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 	out := stdout.String()
 	for _, want := range []string{
-		`{"type":"setWifi","enable":true}`,  // wifi was off
-		`{"type":"setWifi","enable":false}`, // restored at exit
 		`"type":"addDocument"`,
 		`"path":"WebDAV/Book.epub"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %s in output:\n%s", want, out)
 		}
+	}
+	// The server was reachable despite Plato claiming offline, so the hook
+	// must sync directly without toggling Wi-Fi or waiting for events.
+	if strings.Contains(out, "setWifi") || strings.Contains(out, "Waiting") {
+		t.Errorf("reachable server should not trigger wifi handling:\n%s", out)
 	}
 }

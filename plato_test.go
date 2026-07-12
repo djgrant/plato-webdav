@@ -53,6 +53,38 @@ func TestWatchStdinNetworkUp(t *testing.T) {
 	}
 }
 
+func TestWaitForServer(t *testing.T) {
+	ctx := context.Background()
+
+	// Reachable immediately: no waiting.
+	ok := waitForServer(ctx, func(context.Context) error { return nil }, nil, time.Second, time.Hour)
+	if !ok {
+		t.Fatal("immediately reachable server reported unreachable")
+	}
+
+	// Unreachable until a network-up event arrives.
+	up := false
+	ping := func(context.Context) error {
+		if up {
+			return nil
+		}
+		return context.DeadlineExceeded
+	}
+	netUp := make(chan struct{}, 1)
+	go func() {
+		up = true
+		netUp <- struct{}{}
+	}()
+	if !waitForServer(ctx, ping, netUp, 2*time.Second, time.Hour) {
+		t.Fatal("server should be reachable after network-up event")
+	}
+
+	// Never reachable: gives up at maxWait (polling fast).
+	if waitForServer(ctx, func(context.Context) error { return context.DeadlineExceeded }, nil, 50*time.Millisecond, 10*time.Millisecond) {
+		t.Fatal("unreachable server reported reachable")
+	}
+}
+
 func TestWaitForNetworkCancelled(t *testing.T) {
 	// A reader that never produces a network event: block until ctx cancels.
 	netUp := watchStdin(strings.NewReader(""))

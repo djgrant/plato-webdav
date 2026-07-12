@@ -109,3 +109,36 @@ func waitForNetwork(ctx context.Context, netUp <-chan struct{}) bool {
 		return false
 	}
 }
+
+// waitForServer returns once the server answers a ping: Plato's online flag
+// only flips on an observed network-up event, so it can be stale in both
+// directions — the server itself is the source of truth. It re-probes on
+// Plato's network-up events and every pollEvery, giving up after maxWait.
+func waitForServer(ctx context.Context, ping func(context.Context) error, netUp <-chan struct{}, maxWait, pollEvery time.Duration) bool {
+	if ping(ctx) == nil {
+		return true
+	}
+	deadline := time.After(maxWait)
+	tick := time.NewTicker(pollEvery)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-deadline:
+			return false
+		case _, ok := <-netUp:
+			if !ok {
+				netUp = nil // stdin closed; keep polling on the ticker
+				continue
+			}
+			if ping(ctx) == nil {
+				return true
+			}
+		case <-tick.C:
+			if ping(ctx) == nil {
+				return true
+			}
+		}
+	}
+}

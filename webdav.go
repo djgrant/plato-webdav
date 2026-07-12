@@ -215,6 +215,28 @@ func okProp(propstats []davPropstat) (davProp, bool) {
 	return davProp{}, false
 }
 
+// Ping checks whether the server is reachable and answering WebDAV requests.
+func (c *Client) Ping(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "PROPFIND", c.base.String(), strings.NewReader(propfindBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Depth", "0")
+	req.Header.Set("Content-Type", `application/xml; charset="utf-8"`)
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode != http.StatusMultiStatus {
+		return fmt.Errorf("PROPFIND %s: %s", c.base.Redacted(), resp.Status)
+	}
+	return nil
+}
+
 // Available probes whether the file's content can actually be served, using
 // a one-byte ranged GET. Servers backed by cloud storage (e.g. WsgiDAV over
 // iCloud Drive) list placeholder files whose content reads fail with 5xx;

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -45,18 +46,28 @@ func run(args []string, stdin io.Reader, stdout io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
+	// Plato's online flag lags reality (it only flips on an observed
+	// network-up event), so always verify against the server itself.
 	netUp := watchStdin(stdin)
 	wifiWasOff := false
-	if !online {
+	if err := client.Ping(ctx); err != nil {
 		if !wifi {
 			wifiWasOff = true
-			emit.Notify("Establishing a network connection.")
+			emit.Notify("Turning Wi-Fi on…")
 			emit.SetWifi(true)
+		} else if !online {
+			emit.Notify("Waiting for Wi-Fi to connect…")
 		} else {
-			emit.Notify("Waiting for the network to come up.")
+			emit.Notify("Server unreachable, retrying…")
 		}
-		if !waitForNetwork(ctx, netUp) {
-			return 0
+		if !waitForServer(ctx, client.Ping, netUp, 2*time.Minute, 10*time.Second) {
+			if ctx.Err() == nil {
+				emit.Notify("Couldn't reach the WebDAV server after 2 minutes. Check that the Kobo is on the right Wi-Fi network and the server is running.")
+			}
+			if wifiWasOff {
+				emit.SetWifi(false)
+			}
+			return 1
 		}
 	}
 
