@@ -155,6 +155,31 @@ func (s *Syncer) Run(ctx context.Context) error {
 	}
 	sort.Strings(toDownload)
 
+	// The contract is "if it's downloaded on the server, we'll pull it":
+	// probe candidates first and treat unavailable content (cloud
+	// placeholders) as skips, not failures.
+	skipped := 0
+	if len(toDownload) > 0 {
+		available := toDownload[:0]
+		for _, rel := range toDownload {
+			if ctx.Err() != nil {
+				break
+			}
+			ok, err := s.client.Available(ctx, remote[rel].Href)
+			if err != nil {
+				// Probe itself errored: let the real download report it.
+				ok = true
+			}
+			if ok {
+				available = append(available, rel)
+			} else {
+				skipped++
+				fmt.Fprintf(os.Stderr, "skipped (not yet available on server): %s\n", rel)
+			}
+		}
+		toDownload = available
+	}
+
 	var toRemove []string
 	if *s.cfg.DeleteRemoved {
 		for rel := range s.state.Files {
@@ -165,11 +190,15 @@ func (s *Syncer) Run(ctx context.Context) error {
 	}
 	sort.Strings(toRemove)
 
+	skipNote := ""
+	if skipped > 0 {
+		skipNote = fmt.Sprintf(" %d not yet available on server.", skipped)
+	}
 	if len(toDownload) == 0 && len(toRemove) == 0 {
-		s.emit.Notify("Library is up to date.")
+		s.emit.Notify("Library is up to date." + skipNote)
 		return s.state.save(s.saveDir)
 	}
-	s.emit.Notify(fmt.Sprintf("Syncing: %d new, %d removed.", len(toDownload), len(toRemove)))
+	s.emit.Notify(fmt.Sprintf("Syncing: %d new, %d removed.%s", len(toDownload), len(toRemove), skipNote))
 
 	for _, rel := range toRemove {
 		if ctx.Err() != nil {
@@ -186,8 +215,12 @@ func (s *Syncer) Run(ctx context.Context) error {
 	}
 	s.state.save(s.saveDir)
 
-	done := 0
-	for i, rel := range toDownload {
+	// Plato stacks every notification on screen, so on large syncs report
+	// progress in batches and roll all failures into the final summary;
+	// per-file details go to stderr (Plato appends it to its log).
+	const progressEvery = 10
+	done, failed := 0, 0
+	for _, rel := range toDownload {
 		if ctx.Err() != nil {
 			break
 		}
@@ -196,21 +229,30 @@ func (s *Syncer) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				break
 			}
-			s.emit.Notify(fmt.Sprintf("Failed: %s: %v", path.Base(rel), err))
+			failed++
+			fmt.Fprintf(os.Stderr, "failed: %s: %v\n", rel, err)
 			continue
 		}
 		done++
-		s.emit.Notify(fmt.Sprintf("Downloaded %s (%d/%d)", path.Base(rel), i+1, len(toDownload)))
+		if len(toDownload) <= progressEvery {
+			s.emit.Notify(fmt.Sprintf("Downloaded %s (%d/%d)", path.Base(rel), done, len(toDownload)))
+		} else if done%progressEvery == 0 {
+			s.emit.Notify(fmt.Sprintf("Downloaded %d of %d…", done, len(toDownload)))
+		}
 	}
 
 	if err := s.state.save(s.saveDir); err != nil {
 		return err
 	}
+	summary := fmt.Sprintf("Sync complete: %d downloaded, %d removed.", done, len(toRemove))
 	if ctx.Err() != nil {
-		s.emit.Notify("Sync interrupted.")
-	} else {
-		s.emit.Notify(fmt.Sprintf("Sync complete: %d downloaded, %d removed.", done, len(toRemove)))
+		summary = fmt.Sprintf("Sync interrupted: %d downloaded.", done)
 	}
+	if failed > 0 {
+		summary += fmt.Sprintf(" %d failed (will retry next sync).", failed)
+	}
+	summary += skipNote
+	s.emit.Notify(summary)
 	return nil
 }
 

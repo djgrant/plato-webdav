@@ -162,6 +162,46 @@ func TestSyncCancelledBetweenFiles(t *testing.T) {
 	}
 }
 
+func TestSyncSkipsUnavailableFiles(t *testing.T) {
+	files := map[string][]byte{}
+	broken := map[string]bool{}
+	for _, n := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"} {
+		files[n+".epub"] = []byte(n)
+		if n != "a" {
+			broken[n+".epub"] = true
+		}
+	}
+	dav := &fakeDAV{files: files, broken: broken}
+	s, out := newTestSyncer(t, dav)
+	if err := s.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Unavailable files are detected up front and skipped: no failure
+	// notifications, no per-file spam — just listing, plan, progress,
+	// and a summary mentioning the skips.
+	notifies, adds := 0, 0
+	for _, ty := range eventTypes(t, out) {
+		switch ty {
+		case "notify":
+			notifies++
+		case "addDocument":
+			adds++
+		}
+	}
+	if adds != 1 {
+		t.Fatalf("got %d addDocument events, want 1:\n%s", adds, out.String())
+	}
+	if notifies > 4 {
+		t.Fatalf("got %d notify events, want few:\n%s", notifies, out.String())
+	}
+	if strings.Contains(out.String(), "failed") {
+		t.Fatalf("skips must not be reported as failures:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "11 not yet available on server") {
+		t.Fatalf("missing skip note in summary:\n%s", out.String())
+	}
+}
+
 func TestSanitizeSegment(t *testing.T) {
 	cases := map[string]string{
 		`a:b*c?.epub`:  "a_b_c_.epub",

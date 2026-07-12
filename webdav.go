@@ -215,6 +215,35 @@ func okProp(propstats []davPropstat) (davProp, bool) {
 	return davProp{}, false
 }
 
+// Available probes whether the file's content can actually be served, using
+// a one-byte ranged GET. Servers backed by cloud storage (e.g. WsgiDAV over
+// iCloud Drive) list placeholder files whose content reads fail with 5xx;
+// HEAD can't detect this because the body is never opened.
+func (c *Client) Available(ctx context.Context, hrefPath string) (bool, error) {
+	u := *c.base
+	u.Path = hrefPath
+	u.RawPath = ""
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Range", "bytes=0-0")
+	resp, err := c.do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	switch {
+	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent:
+		return true, nil
+	case resp.StatusCode >= 500:
+		return false, nil
+	default:
+		return false, fmt.Errorf("GET %s: %s", u.Redacted(), resp.Status)
+	}
+}
+
 // Get streams the file at the given decoded server path.
 func (c *Client) Get(ctx context.Context, hrefPath string) (io.ReadCloser, int64, error) {
 	u := *c.base

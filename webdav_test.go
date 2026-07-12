@@ -17,6 +17,7 @@ import (
 type fakeDAV struct {
 	prefix string            // URL path prefix of the DAV root, e.g. "/dav"
 	files  map[string][]byte // slash paths relative to root, e.g. "Sub Dir/A Book.epub"
+	broken map[string]bool   // paths whose GET returns 500 (e.g. dataless cloud files)
 	user   string
 	pass   string
 }
@@ -35,6 +36,10 @@ func (f *fakeDAV) handler() http.Handler {
 		case "PROPFIND":
 			f.propfind(w, rel)
 		case http.MethodGet:
+			if f.broken[rel] {
+				http.Error(w, "Resource deadlock avoided", http.StatusInternalServerError)
+				return
+			}
 			data, ok := f.files[rel]
 			if !ok {
 				http.NotFound(w, r)
