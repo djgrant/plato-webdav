@@ -126,7 +126,6 @@ func (s *Syncer) scanLocal() (map[string]bool, error) {
 }
 
 func (s *Syncer) Run(ctx context.Context) error {
-	s.emit.Notify("Listing WebDAV server…")
 	listed, err := s.client.List(ctx, *s.cfg.Recursive)
 	if err != nil {
 		return fmt.Errorf("listing failed: %w", err)
@@ -200,10 +199,9 @@ func (s *Syncer) Run(ctx context.Context) error {
 		skipNote = fmt.Sprintf(" %d not yet available on server.", skipped)
 	}
 	if len(toDownload) == 0 && len(toRemove) == 0 {
-		s.emit.Notify("Library is up to date." + skipNote)
+		s.emit.Notify("Up to date." + skipNote)
 		return s.state.save(s.saveDir)
 	}
-	s.emit.Notify(fmt.Sprintf("Syncing: %d new, %d removed.%s", len(toDownload), len(toRemove), skipNote))
 
 	for _, rel := range toRemove {
 		if ctx.Err() != nil {
@@ -220,10 +218,13 @@ func (s *Syncer) Run(ctx context.Context) error {
 	}
 	s.state.save(s.saveDir)
 
-	// Plato stacks every notification on screen, so on large syncs report
-	// progress in batches and roll all failures into the final summary;
-	// per-file details go to stderr (Plato appends it to its log).
+	// Plato stacks every notification on screen, so stay quiet: batched
+	// progress only on large syncs, everything else rolled into one final
+	// summary. Per-file details go to stderr (Plato appends it to its log).
 	const progressEvery = 10
+	if len(toDownload) > progressEvery {
+		s.emit.Notify(fmt.Sprintf("Syncing %d documents…", len(toDownload)))
+	}
 	done, failed := 0, 0
 	for _, rel := range toDownload {
 		if ctx.Err() != nil {
@@ -239,9 +240,7 @@ func (s *Syncer) Run(ctx context.Context) error {
 			continue
 		}
 		done++
-		if len(toDownload) <= progressEvery {
-			s.emit.Notify(fmt.Sprintf("Downloaded %s (%d/%d)", path.Base(rel), done, len(toDownload)))
-		} else if done%progressEvery == 0 {
+		if len(toDownload) > progressEvery && done%progressEvery == 0 {
 			s.emit.Notify(fmt.Sprintf("Downloaded %d of %d…", done, len(toDownload)))
 		}
 	}
@@ -285,16 +284,23 @@ func (s *Syncer) download(ctx context.Context, rel string, rf RemoteFile) error 
 		return err
 	}
 	var n int64
-	if kindOf(rf.RelPath) == "md" {
-		var md []byte
-		md, err = io.ReadAll(body)
-		if err == nil && length > 0 && int64(len(md)) != length {
-			err = fmt.Errorf("short download: got %d of %d bytes", len(md), length)
+	kind := kindOf(rf.RelPath)
+	if kind == "md" || (s.cfg.SanitizeHTML && (kind == "html" || kind == "htm")) {
+		var raw []byte
+		raw, err = io.ReadAll(body)
+		if err == nil && length > 0 && int64(len(raw)) != length {
+			err = fmt.Errorf("short download: got %d of %d bytes", len(raw), length)
 		}
 		if err == nil {
-			title := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+			out := ""
+			if kind == "md" {
+				title := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+				out = markdownToHTML(string(raw), title)
+			} else {
+				out = sanitizeHTML(string(raw))
+			}
 			var written int
-			written, err = f.WriteString(markdownToHTML(string(md), title))
+			written, err = f.WriteString(out)
 			n = int64(written)
 		}
 	} else {

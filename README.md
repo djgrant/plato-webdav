@@ -49,6 +49,7 @@ syncs, and turns Wi-Fi back off.
 | `recursive` | `true` | Mirror server subdirectories into the folder |
 | `delete-removed` | `true` | Delete local copies of books removed on the server |
 | `allowed-kinds` | Plato's defaults | File extensions to sync |
+| `sanitize-html` | `false` | Strip `<style>`/`<script>`/inline styles from downloaded HTML (Plato's renderer supports only a small CSS subset; modern stylesheets can render blank) |
 | `timeout-seconds` | `60` | HTTP response-header timeout |
 
 Change detection uses ETags (falling back to size + last-modified), stored in

@@ -202,6 +202,50 @@ func TestSyncSkipsUnavailableFiles(t *testing.T) {
 	}
 }
 
+func TestSyncSanitizesHTML(t *testing.T) {
+	page := `<html><head><style>:root{--x:1}</style><link rel="stylesheet" href="x.css"></head>` +
+		`<body style="margin:0"><script>alert(1)</script><h1>Doc</h1><p>Body text.</p></body></html>`
+	dav := &fakeDAV{files: map[string][]byte{"doc.html": []byte(page)}}
+	s, _ := newTestSyncer(t, dav)
+	s.cfg.AllowedKinds = []string{"html"}
+	s.cfg.SanitizeHTML = true
+	if err := s.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(s.saveDir, "doc.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, banned := range []string{"<style", "<script", "style=", "<link"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("sanitized HTML still contains %q:\n%s", banned, got)
+		}
+	}
+	for _, want := range []string{"<h1>Doc</h1>", "<p>Body text.</p>"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("sanitized HTML lost content %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSmallSyncEmitsSingleNotification(t *testing.T) {
+	dav := &fakeDAV{files: map[string][]byte{"a.epub": []byte("a"), "b.epub": []byte("b")}}
+	s, out := newTestSyncer(t, dav)
+	if err := s.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	notifies := 0
+	for _, ty := range eventTypes(t, out) {
+		if ty == "notify" {
+			notifies++
+		}
+	}
+	if notifies != 1 {
+		t.Fatalf("small sync should emit exactly 1 notification, got %d:\n%s", notifies, out.String())
+	}
+}
+
 func TestSyncConvertsMarkdownToHTML(t *testing.T) {
 	dav := &fakeDAV{files: map[string][]byte{
 		"Review Me.md": []byte("# Title\n\nSome *notes* here.\n\n- one\n- two\n"),

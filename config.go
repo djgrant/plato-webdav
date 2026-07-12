@@ -18,6 +18,7 @@ type Config struct {
 	Recursive          *bool    `json:"recursive"`
 	AllowedKinds       []string `json:"allowed-kinds"`
 	DeleteRemoved      *bool    `json:"delete-removed"`
+	SanitizeHTML       bool     `json:"sanitize-html"`
 	TimeoutSeconds     int      `json:"timeout-seconds"`
 }
 

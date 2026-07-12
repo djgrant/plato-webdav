@@ -12,6 +12,24 @@ import (
 // common subset: headings, paragraphs, emphasis, inline/fenced code,
 // blockquotes, unordered/ordered lists, links, and horizontal rules.
 
+// Plato's HTML renderer (its epub engine) supports only a small CSS subset;
+// modern stylesheets (custom properties, grid/flex) can collapse a page to
+// nothing. Stripping styles and scripts leaves semantic HTML it renders well.
+var (
+	reScript    = regexp.MustCompile(`(?is)<script\b.*?</script>`)
+	reStyle     = regexp.MustCompile(`(?is)<style\b.*?</style>`)
+	reStyleAttr = regexp.MustCompile(`(?i)\s+style\s*=\s*("[^"]*"|'[^']*')`)
+	reLinkCSS   = regexp.MustCompile(`(?i)<link\b[^>]*>`)
+)
+
+func sanitizeHTML(s string) string {
+	s = reScript.ReplaceAllString(s, "")
+	s = reStyle.ReplaceAllString(s, "")
+	s = reStyleAttr.ReplaceAllString(s, "")
+	s = reLinkCSS.ReplaceAllString(s, "")
+	return s
+}
+
 var (
 	mdCode   = regexp.MustCompile("`([^`]+)`")
 	mdBold   = regexp.MustCompile(`\*\*([^*]+)\*\*|__([^_]+)__`)
