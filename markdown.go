@@ -20,6 +20,12 @@ var (
 	reStyle     = regexp.MustCompile(`(?is)<style\b.*?</style>`)
 	reStyleAttr = regexp.MustCompile(`(?i)\s+style\s*=\s*("[^"]*"|'[^']*')`)
 	reLinkCSS   = regexp.MustCompile(`(?i)<link\b[^>]*>`)
+	// Plato parses documents with a strict XML parser: an HTML5 void tag
+	// like <meta charset="utf-8"> stays "open", swallowing the rest of the
+	// document as children — the body ends up inside <head>, which the
+	// built-in stylesheet hides, rendering a blank page. Self-closing the
+	// void elements keeps the tree properly nested.
+	reVoidTag = regexp.MustCompile(`(?i)<(meta|br|hr|img|input|source|wbr|col|area|base|embed|track|param)(\b[^>]*?)\s*/?>`)
 )
 
 func sanitizeHTML(s string) string {
@@ -27,6 +33,7 @@ func sanitizeHTML(s string) string {
 	s = reStyle.ReplaceAllString(s, "")
 	s = reStyleAttr.ReplaceAllString(s, "")
 	s = reLinkCSS.ReplaceAllString(s, "")
+	s = reVoidTag.ReplaceAllString(s, "<$1$2/>")
 	return s
 }
 

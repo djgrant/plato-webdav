@@ -203,8 +203,8 @@ func TestSyncSkipsUnavailableFiles(t *testing.T) {
 }
 
 func TestSyncSanitizesHTML(t *testing.T) {
-	page := `<html><head><style>:root{--x:1}</style><link rel="stylesheet" href="x.css"></head>` +
-		`<body style="margin:0"><script>alert(1)</script><h1>Doc</h1><p>Body text.</p></body></html>`
+	page := `<html><head><meta charset="utf-8"><style>:root{--x:1}</style><link rel="stylesheet" href="x.css"></head>` +
+		`<body style="margin:0"><script>alert(1)</script><h1>Doc</h1><p>An image <img src="x.png"> and a break<br>here.</p></body></html>`
 	dav := &fakeDAV{files: map[string][]byte{"doc.html": []byte(page)}}
 	s, _ := newTestSyncer(t, dav)
 	s.cfg.AllowedKinds = []string{"html"}
@@ -222,9 +222,11 @@ func TestSyncSanitizesHTML(t *testing.T) {
 			t.Errorf("sanitized HTML still contains %q:\n%s", banned, got)
 		}
 	}
-	for _, want := range []string{"<h1>Doc</h1>", "<p>Body text.</p>"} {
+	// Void tags must be self-closed for Plato's strict XML parser —
+	// otherwise the whole body nests inside <head> and renders blank.
+	for _, want := range []string{`<meta charset="utf-8"/>`, `<img src="x.png"/>`, "<br/>", "<h1>Doc</h1>"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("sanitized HTML lost content %q:\n%s", want, got)
+			t.Errorf("sanitized HTML missing %q:\n%s", want, got)
 		}
 	}
 }
