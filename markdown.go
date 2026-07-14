@@ -53,12 +53,8 @@ var (
 // a native <table> overflows the viewport with nowhere to scroll. Past these
 // thresholds we fall back to a definition-list layout that always reflows.
 const (
-	maxTableCols = 3
-	// Native tables wrap cell text, so width alone rarely forces overflow —
-	// column count is the real constraint on a narrow screen. We only fall
-	// back on width when a single cell is so long it would dominate the row
-	// and starve its neighbours (e.g. a whole paragraph in one column).
-	maxCellLen = 160
+	maxTableCols  = 3
+	maxTableWidth = 56 // characters across the widest row
 )
 
 // splitRow splits a table line into trimmed cell strings, tolerating the
@@ -79,23 +75,37 @@ func isWideTable(header []string, rows [][]string) bool {
 	if len(header) > maxTableCols {
 		return true
 	}
-	for _, r := range append([][]string{header}, rows...) {
-		for _, c := range r {
-			if len(c) > maxCellLen {
-				return true
-			}
+	widest := rowWidth(header)
+	for _, r := range rows {
+		if w := rowWidth(r); w > widest {
+			widest = w
 		}
 	}
-	return false
+	return widest > maxTableWidth
 }
 
-// renderTable emits a <table> for narrow tables, or a reflowing definition
-// list for wide ones so the content stays legible on small screens.
+func rowWidth(cells []string) int {
+	w := 0
+	for _, c := range cells {
+		w += len(c) + 3 // cell text plus " | " separators
+	}
+	return w
+}
+
+// Plato ignores our CSS, so borders and bold come from presentational HTML
+// instead: the border attribute on <table>, and <strong> inside header cells.
+const tableTag = `<table border="1" cellpadding="4" cellspacing="0">`
+
+// renderTable emits a bordered <table> for narrow tables. Wide ones can't fit
+// a small screen side-by-side, so each row is re-expressed vertically as its
+// own heading plus a two-column (label | value) bordered table — narrow by
+// construction, and a natural fit for empty-top-left matrices where the first
+// column is really a row-label axis.
 func renderTable(b *strings.Builder, header []string, rows [][]string) {
 	if !isWideTable(header, rows) {
-		b.WriteString("<table>\n<thead>\n<tr>")
+		b.WriteString(tableTag + "\n<thead>\n<tr>")
 		for _, h := range header {
-			b.WriteString("<th>" + mdInline(h) + "</th>")
+			b.WriteString("<th><strong>" + mdInline(h) + "</strong></th>")
 		}
 		b.WriteString("</tr>\n</thead>\n<tbody>\n")
 		for _, r := range rows {
@@ -109,15 +119,15 @@ func renderTable(b *strings.Builder, header []string, rows [][]string) {
 		return
 	}
 
-	// Wide fallback: each row becomes a labelled block. The first column
-	// heads the block; the rest become header/value pairs.
+	// Wide fallback: the first column heads each block; the remaining column
+	// headers become the left label column, their cells the right value column.
 	for _, r := range rows {
-		b.WriteString("<h4>" + mdInline(cell(r, 0)) + "</h4>\n<dl>\n")
+		b.WriteString("<h4>" + mdInline(cell(r, 0)) + "</h4>\n" + tableTag + "\n<tbody>\n")
 		for i := 1; i < len(header); i++ {
-			b.WriteString("<dt>" + mdInline(header[i]) + "</dt>")
-			b.WriteString("<dd>" + mdInline(cell(r, i)) + "</dd>\n")
+			b.WriteString("<tr><th><strong>" + mdInline(header[i]) + "</strong></th>")
+			b.WriteString("<td>" + mdInline(cell(r, i)) + "</td></tr>\n")
 		}
-		b.WriteString("</dl>\n")
+		b.WriteString("</tbody>\n</table>\n")
 	}
 }
 
@@ -267,22 +277,6 @@ func markdownToHTML(md, title string) string {
 	}
 
 	return "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"/><title>" +
-		html.EscapeString(title) + "</title>\n" + mdStyle + "</head><body>\n" +
+		html.EscapeString(title) + "</title></head><body>\n" +
 		b.String() + "</body></html>\n"
 }
-
-// mdStyle is a minimal stylesheet for our generated documents. Unlike
-// downloaded HTML, markdown output never passes through sanitizeHTML, so this
-// survives. It sticks to the basic properties Plato's renderer honours:
-// collapsed borders and padding for tables, bold headers, and a bordered
-// block for the wide-table definition-list fallback.
-const mdStyle = `<style>
-table { border-collapse: collapse; width: 100%; margin: 1em 0; }
-th, td { border: 1px solid #444; padding: 4px 6px; text-align: left; vertical-align: top; word-break: break-word; }
-th { font-weight: bold; }
-dl { border: 1px solid #444; padding: 6px 10px; margin: 0 0 1em; }
-dt { font-weight: bold; }
-dd { margin: 0 0 6px 0; }
-h4 { margin: 1em 0 0.25em; }
-</style>
-`
