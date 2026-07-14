@@ -41,9 +41,20 @@ func TestWideTableFallsBackToDefinitionList(t *testing.T) {
 	}
 }
 
+func TestModerateThreeColumnStaysTable(t *testing.T) {
+	// A 3-column table with a fairly long cell should stay a table: native
+	// wrapping handles it, so it must not fall back to a definition list.
+	md := "| Key | Default | Meaning |\n| - | - | - |\n" +
+		"| server-url | (required) | WebDAV collection URL for the share you sync |\n"
+	got := markdownToHTML(md, "t")
+	if !strings.Contains(got, "<table>") {
+		t.Errorf("expected a table for moderate 3-column content, got:\n%s", got)
+	}
+}
+
 func TestWideTableByCellWidth(t *testing.T) {
-	// Two columns, but a long cell pushes the row past maxTableWidth.
-	long := strings.Repeat("x", 80)
+	// Two columns, but a cell longer than maxCellLen triggers the fallback.
+	long := strings.Repeat("x", maxCellLen+10)
 	md := "| Name | Notes |\n| - | - |\n| Ann | " + long + " |\n"
 	got := markdownToHTML(md, "t")
 

@@ -53,8 +53,12 @@ var (
 // a native <table> overflows the viewport with nowhere to scroll. Past these
 // thresholds we fall back to a definition-list layout that always reflows.
 const (
-	maxTableCols  = 3
-	maxTableWidth = 56 // characters across the widest row
+	maxTableCols = 3
+	// Native tables wrap cell text, so width alone rarely forces overflow —
+	// column count is the real constraint on a narrow screen. We only fall
+	// back on width when a single cell is so long it would dominate the row
+	// and starve its neighbours (e.g. a whole paragraph in one column).
+	maxCellLen = 160
 )
 
 // splitRow splits a table line into trimmed cell strings, tolerating the
@@ -75,21 +79,14 @@ func isWideTable(header []string, rows [][]string) bool {
 	if len(header) > maxTableCols {
 		return true
 	}
-	widest := rowWidth(header)
-	for _, r := range rows {
-		if w := rowWidth(r); w > widest {
-			widest = w
+	for _, r := range append([][]string{header}, rows...) {
+		for _, c := range r {
+			if len(c) > maxCellLen {
+				return true
+			}
 		}
 	}
-	return widest > maxTableWidth
-}
-
-func rowWidth(cells []string) int {
-	w := 0
-	for _, c := range cells {
-		w += len(c) + 3 // cell text plus " | " separators
-	}
-	return w
+	return false
 }
 
 // renderTable emits a <table> for narrow tables, or a reflowing definition
@@ -270,5 +267,22 @@ func markdownToHTML(md, title string) string {
 	}
 
 	return "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"/><title>" +
-		html.EscapeString(title) + "</title></head><body>\n" + b.String() + "</body></html>\n"
+		html.EscapeString(title) + "</title>\n" + mdStyle + "</head><body>\n" +
+		b.String() + "</body></html>\n"
 }
+
+// mdStyle is a minimal stylesheet for our generated documents. Unlike
+// downloaded HTML, markdown output never passes through sanitizeHTML, so this
+// survives. It sticks to the basic properties Plato's renderer honours:
+// collapsed borders and padding for tables, bold headers, and a bordered
+// block for the wide-table definition-list fallback.
+const mdStyle = `<style>
+table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+th, td { border: 1px solid #444; padding: 4px 6px; text-align: left; vertical-align: top; word-break: break-word; }
+th { font-weight: bold; }
+dl { border: 1px solid #444; padding: 6px 10px; margin: 0 0 1em; }
+dt { font-weight: bold; }
+dd { margin: 0 0 6px 0; }
+h4 { margin: 1em 0 0.25em; }
+</style>
+`
