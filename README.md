@@ -36,7 +36,9 @@ sideload into the folder yourself are never touched.
 
 Tapping the `WebDAV` directory in Plato's navigation bar triggers the sync.
 If the device is offline, the hook turns on Wi-Fi, waits for the network,
-syncs, and turns Wi-Fi back off.
+and syncs. It never forces Wi-Fi back off: cutting the network as Plato
+hands control back to Nickel can fail Nickel's account sync and drop the
+device to the activation screen, so the hook leaves Wi-Fi as it found it.
 
 ## Configuration (`Settings.json`, next to the binary)
 

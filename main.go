@@ -49,10 +49,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer) int {
 	// Plato's online flag lags reality (it only flips on an observed
 	// network-up event), so always verify against the server itself.
 	netUp := watchStdin(stdin)
-	wifiWasOff := false
 	if err := client.Ping(ctx); err != nil {
 		if !wifi {
-			wifiWasOff = true
 			emit.Notify("Turning Wi-Fi on…")
 			emit.SetWifi(true)
 		} else if !online {
@@ -63,9 +61,6 @@ func run(args []string, stdin io.Reader, stdout io.Writer) int {
 		if !waitForServer(ctx, client.Ping, netUp, 2*time.Minute, 10*time.Second) {
 			if ctx.Err() == nil {
 				emit.Notify("Couldn't reach the WebDAV server after 2 minutes. Check that the Kobo is on the right Wi-Fi network and the server is running.")
-			}
-			if wifiWasOff {
-				emit.SetWifi(false)
 			}
 			return 1
 		}
@@ -81,9 +76,10 @@ func run(args []string, stdin io.Reader, stdout io.Writer) int {
 	}
 	err = syncer.Run(ctx)
 
-	if wifiWasOff {
-		emit.SetWifi(false)
-	}
+	// We never force Wi-Fi off on exit: when Plato hands control back to
+	// Nickel, cutting the network mid-handoff can fail Nickel's account
+	// sync and drop the device to the activation screen. Leave Wi-Fi as-is
+	// and let Plato/Nickel own its lifecycle.
 	if err != nil && ctx.Err() == nil {
 		return fail(err)
 	}
