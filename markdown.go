@@ -43,7 +43,93 @@ var (
 	mdItalic = regexp.MustCompile(`\*([^*]+)\*|\b_([^_]+)_\b`)
 	mdLink   = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)`)
 	mdOlItem = regexp.MustCompile(`^\d+\.\s+`)
+	// A GFM table separator row: pipes plus cells of dashes with optional
+	// alignment colons, e.g. | :--- | ---: | :---: |.
+	mdTableSep = regexp.MustCompile(`^\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$`)
 )
+
+// Kobo Clara-class devices are 6" / ~1072px wide, and we strip all CSS, so we
+// can't constrain column widths. Beyond a few columns — or with long cells —
+// a native <table> overflows the viewport with nowhere to scroll. Past these
+// thresholds we fall back to a definition-list layout that always reflows.
+const (
+	maxTableCols  = 3
+	maxTableWidth = 56 // characters across the widest row
+)
+
+// splitRow splits a table line into trimmed cell strings, tolerating the
+// optional leading/trailing pipes GFM allows.
+func splitRow(line string) []string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimPrefix(line, "|")
+	line = strings.TrimSuffix(line, "|")
+	cells := strings.Split(line, "|")
+	for i := range cells {
+		cells[i] = strings.TrimSpace(cells[i])
+	}
+	return cells
+}
+
+// isWideTable decides whether a table would overflow a narrow e-reader page.
+func isWideTable(header []string, rows [][]string) bool {
+	if len(header) > maxTableCols {
+		return true
+	}
+	widest := rowWidth(header)
+	for _, r := range rows {
+		if w := rowWidth(r); w > widest {
+			widest = w
+		}
+	}
+	return widest > maxTableWidth
+}
+
+func rowWidth(cells []string) int {
+	w := 0
+	for _, c := range cells {
+		w += len(c) + 3 // cell text plus " | " separators
+	}
+	return w
+}
+
+// renderTable emits a <table> for narrow tables, or a reflowing definition
+// list for wide ones so the content stays legible on small screens.
+func renderTable(b *strings.Builder, header []string, rows [][]string) {
+	if !isWideTable(header, rows) {
+		b.WriteString("<table>\n<thead>\n<tr>")
+		for _, h := range header {
+			b.WriteString("<th>" + mdInline(h) + "</th>")
+		}
+		b.WriteString("</tr>\n</thead>\n<tbody>\n")
+		for _, r := range rows {
+			b.WriteString("<tr>")
+			for i := range header {
+				b.WriteString("<td>" + mdInline(cell(r, i)) + "</td>")
+			}
+			b.WriteString("</tr>\n")
+		}
+		b.WriteString("</tbody>\n</table>\n")
+		return
+	}
+
+	// Wide fallback: each row becomes a labelled block. The first column
+	// heads the block; the rest become header/value pairs.
+	for _, r := range rows {
+		b.WriteString("<h4>" + mdInline(cell(r, 0)) + "</h4>\n<dl>\n")
+		for i := 1; i < len(header); i++ {
+			b.WriteString("<dt>" + mdInline(header[i]) + "</dt>")
+			b.WriteString("<dd>" + mdInline(cell(r, i)) + "</dd>\n")
+		}
+		b.WriteString("</dl>\n")
+	}
+}
+
+func cell(row []string, i int) string {
+	if i < len(row) {
+		return row[i]
+	}
+	return ""
+}
 
 func mdInline(s string) string {
 	s = html.EscapeString(s)
@@ -81,8 +167,31 @@ func markdownToHTML(md, title string) string {
 		}
 	}
 
-	for _, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		trimmed := strings.TrimSpace(line)
+
+		// A table is a header row followed by a separator row of dashes.
+		if !inCode && strings.Contains(trimmed, "|") &&
+			i+1 < len(lines) && mdTableSep.MatchString(strings.TrimSpace(lines[i+1])) {
+			flushPara()
+			closeList()
+			closeQuote()
+			header := splitRow(trimmed)
+			var rows [][]string
+			i += 2 // skip header and separator
+			for i < len(lines) {
+				rt := strings.TrimSpace(lines[i])
+				if rt == "" || !strings.Contains(rt, "|") {
+					break
+				}
+				rows = append(rows, splitRow(rt))
+				i++
+			}
+			i-- // loop will re-increment
+			renderTable(&b, header, rows)
+			continue
+		}
 
 		if strings.HasPrefix(trimmed, "```") {
 			flushPara()
